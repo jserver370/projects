@@ -1,0 +1,266 @@
+from __future__ import print_function
+import numpy as np
+from scipy.constants import h, c, pi
+import matplotlib.pyplot as plt
+from numba import njit
+
+deltalamb_s = 0.1 * (10) ** (-9) #ширина спектра
+deltalamb_ase = 30 * (10) ** (-9) #ширина спектра
+n = 1.5 #показатель преломления
+k = 0.01 * 10 ** (-5) # коэф. пропорциональности между амплитудой смещения и мощностью накачки
+NA = 0.2 #Числовая аппертура
+a = 2.5 * 10 ** -6  #Радиус сердцевины
+sigma4 = 7.7 * (10) ** (-26) # сечение излучения на длине волны накачки
+sigma1 = - 2.58 * (10) ** (-25) #сечение поглощения на длине волны накачки
+sigma2 = 3.283 * (10) ** (-25) #сечение излучения спонт люминес на длине волны излучения
+sigma3 = - 2.655 * (10) ** (-25) #сечение поглощения спонт люминес на длине волны излучения
+N_0 = 5 * (10) ** 24  #концентрация активных ионов
+lamb_s = 1540 * (10) ** (-9)  #длина волны излучения
+lamb_p = 980 * (10) ** (-9) #длина волны накачки
+tau1 = 0.0105 #время спонт. релаксации
+tau2 = 2 * (10) ** -6
+P_nul1 = 30 * (10) ** -3 #Постоян составл. начальной мощности накачки
+Pfiks = 5 * (10) ** -3
+
+
+V = c/n # скорость в среде
+ket = 2 * a * pi * NA / lamb_s
+omega_s = a * (0.65 + 1.62 * (ket) ** -1.5) # эффектив. радиус моды)
+P_th = (pi * (a ** (2)) * h * c)/(lamb_p * (- sigma1) * tau1) # пороговая мощность накачки
+eta = np.exp(-((a ** (2))/(omega_s ** (2)) ))
+deltagam = 2 * pi * (NA) ** 2
+ksi = deltalamb_s/deltalamb_ase
+
+ark = N_0 * sigma2 * (1 - eta)
+brk = N_0 * (-sigma3) * (1 - eta)
+
+
+freq1 = 100 * (10) ** 3 # собст. частота колебаний осциллятора
+freq = freq1  # частота модуляции мощности накачки
+t0 = 0.0002 # время установления колебаний
+L = 2.5 # длина активного световода
+m = 1.0 # глубина модуляции
+
+gamma = (h * c * deltagam * (1 - ksi) *(omega_s) ** 2)/(4 * tau1 * lamb_s)
+# print(gamma)
+
+
+# Расчет констант для простоты дальнейших выражений
+C1 =  (sigma1 * lamb_p )/(pi * h * c * (omega_s) ** 2)
+C2 = (sigma2 * lamb_s )/(pi * h * c * (omega_s) ** 2)
+C3 =  (sigma3 * lamb_s )/(pi * h * c * (omega_s) ** 2)
+C4 = (sigma4 * lamb_p )/(pi * h * c * (omega_s) ** 2)
+
+# C1 = C1 * P_nul1
+# C2 = C2 * P_nul1
+# C3 = C3 * P_nul1
+# C4 = C4 * P_nul1
+# sigma1 = sigma1 * N_0/L
+# sigma4 = sigma4 * N_0/L
+# sigma2 = sigma1 * N_0/L
+# sigma3 = sigma1 * N_0/L
+# gamma = gamma * (N_0/L)/ P_nul1
+# print(C1)
+# print(sigma1)
+# print(gamma)
+
+# Задаем константы для уравнения движения
+mass = 10 ** -9
+Q = 100
+R0 = 0.9
+teta_0 = 0.002
+fi_0 = teta_0
+hi = 2000
+
+# Решаем СЛОДУ здесь
+
+
+aa = 2 * pi * freq1 / Q
+bb = (2 * pi * freq1) ** 2
+cc = k / (mass)
+
+# cc = cc * P_nul1
+
+delta_t = 10 ** -6
+delta_z = 0.01
+# print(V * delta_t / delta_z)
+nz = int(L / delta_z)
+z_mass, dz = np.linspace(0., L, nz, retstep=True)
+N0 = N_0 * np.ones(z_mass.size) / L
+# N0 = np.ones(z_mass.size)
+nt = 30000
+t_mass, dt = np.linspace(0., nt*delta_t, nt, retstep=True)
+p1_plus_right = np.zeros(nt+1)
+p2_plus_right = np.zeros(nt+1)
+p1_minus_left = np.zeros(nt+1)
+p2_minus_left = np.zeros(nt+1)
+r_mass = np.zeros(nt+1)
+p_por = np.zeros (nt+1)
+Ge = np.zeros(nt+1)
+Ga = np.zeros(nt+1)
+G = np.zeros(nt+1)
+K = np.zeros(nt+1)
+
+def P1_plus_Left(t):
+    P1_plus_left =  P_nul1 * (1 - np.exp(-t / t0)) * (1 + m * np.cos(2 * pi * freq * t))
+
+    return P1_plus_left
+
+
+#def Ppor_plus_Left(t):
+    #Ppor_plus_left =  P_th * (1 - np.exp(-t / t0)) * (1 + m * np.cos(2 * pi * freq * t))
+
+    #return Ppor_plus_left
+
+
+# @njit
+def Eq3(dz, N0, N1, N2, P1_plus_left, sigma4, sigma1):
+    p1_plus = np.zeros(N0.size)
+    p1_plus[0] = P1_plus_left
+    for i in range(N0.size - 1):
+        k1 = (sigma4 * (N0[i] - N1[i] - N2[i]) + sigma1 * N1[i]) * p1_plus[i]
+        k2 = (sigma4 * (N0[i+1] - N1[i+1] - N2[i+1]) + sigma1 * N1[i+1]) * (p1_plus[i] + k1 * dz)
+        p1_plus[i+1] = p1_plus[i] + dz / 2 * (k1 + k2)
+
+    return p1_plus
+
+def U_ode(U_vek, P1_plus_L):
+    U = U_vek[0]
+    Ut = U_vek[1]
+    dUdt = Ut
+    dUtdt = -aa * Ut - bb * U + cc * P1_plus_L
+
+    return np.array([dUdt, dUtdt])
+
+def Eq7_RK(U, Ut, ti):
+    U_vek = np.array([U, Ut])
+    k1 = U_ode(U_vek, p1_plus_right[ti])
+    k2 = U_ode(U_vek + k1 * dt / 2, (p1_plus_right[ti] + p1_plus_right[ti+1]) / 2)
+    k3 = U_ode(U_vek + k2 * dt / 2, (p1_plus_right[ti] + p1_plus_right[ti+1]) / 2)
+    k4 = U_ode(U_vek + k3 * dt, p1_plus_right[ti+1])
+    U_vek_next = U_vek + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+
+    return (U_vek_next[0], U_vek_next[1])
+
+# @njit
+def Eq4(dz, N0, N1, N2, P1_minus_right, sigma4, sigma1):
+    p1_minus = np.zeros(N0.size)
+    p1_minus[-1] = P1_minus_right
+    for i in range(N0.size - 1):
+        k1 = (sigma4 * (N0[-1-i] - N1[-1-i] - N2[-1-i]) + sigma1 * N1[-1-i]) * p1_minus[-1-i]
+        k2 = (sigma4 * (N0[-2-i] - N1[-2-i] - N2[-2-i]) + sigma1 * N1[-2-i]) * (p1_minus[-1-i] + k1 * dz)
+        p1_minus[-2-i] = p1_minus[-1-i] + dz / 2 * (k1 + k2)
+
+    return p1_minus
+
+# @njit
+def Eq5(dz, N1, N2, P2_plus_left, sigma2, sigma3, gamma):
+    p2_plus = np.zeros(N1.size)
+    p2_plus[0] = P2_plus_left
+    for i in range(N1.size - 1):
+        k1 = (sigma2 * N2[i] + sigma3 * N1[i]) * p2_plus[i] + gamma * N2[i]
+        k2 = (sigma2 * N2[i+1] + sigma3 * N1[i+1]) * (p2_plus[i] + k1 * dz) + gamma * N2[i+1]
+        p2_plus[i+1] = p2_plus[i] + dz / 2 * (k1 + k2)
+
+    return p2_plus
+
+# @njit
+def Eq6(dz, N1, N2, P2_minus_right, sigma2, sigma3, gamma):
+    p2_minus = np.zeros(N1.size)
+    p2_minus[-1] = P2_minus_right
+    for i in range(N1.size - 1):
+        k1 = (sigma2 * N2[-1-i] + sigma3 * N1[-1-i]) * p2_minus[-1-i] + gamma * N1[-1-i]
+        k2 = (sigma2 * N2[-2-i] + sigma3 * N1[-2-i]) * (p2_minus[-1-i] + k1 * dz) + gamma * N2[-2-i]
+        p2_minus[-2-i] = p2_minus[-1-i] + dz / 2 * (k1 + k2)
+
+    return p2_minus
+
+def Eq8(U):
+    R = R0 * (1 - np.exp(-(fi_0 + hi * (U)) ** 2/((teta_0) ** 2)))
+
+    return R
+
+def Eq12(t, N1N2, r, ti=None):
+    N1 = N1N2[0, :]
+    N2 = N1N2[1, :]
+    P1_plus_left = P1_plus_Left(t)
+    P1_plus = Eq3(dz, N0, N1, N2, P1_plus_left, sigma4, sigma1)
+    #Ppor_plus_left = Ppor_plus_Left(t)
+    P_por = Eq3(dz, N0, (sigma2/-sigma3)*N2, N2, P1_plus_left, sigma4, sigma1)
+    P1_minus_right = r * P1_plus[-1]
+    P1_minus = Eq4(dz, N0, N1, N2, P1_minus_right, sigma4, sigma1)
+    P2_plus_left = 0
+    P2_plus = Eq5(dz, N1, N2, P2_plus_left, sigma2, sigma3, gamma)
+    P2_minus_right = r * P2_plus[-1]
+    P2_minus = Eq6(dz, N1, N2, P2_minus_right, sigma2, sigma3, gamma)
+    dN1dt = (C1 * N1 + C4 * (N0 - N1 - N2)) * (P1_plus + P1_minus) + (C2 * N2 + C3 * N1) * (P2_plus + P2_minus) + N2 / tau1
+    dN2dt = (-C3 * N1 - C2 * N2) * (P2_plus + P2_minus) + (N0 - N1 - N2) / tau2 + N2 / tau1
+    dNdt = np.zeros((2, N1.size))
+    dNdt[0, :] = dN1dt
+    dNdt[1, :] = dN2dt
+    if ti is not None:
+        p1_plus_right[ti] = P1_plus[-1]
+        p2_plus_right[ti] = P2_plus[-1]
+        p1_minus_left[ti] = P1_minus[0]
+        p2_minus_left[ti] = P2_minus[0]
+        p_por[ti] = P_por[-1]
+        Ge[ti] = (ark * (p1_plus_right[ti]/p_por[ti]))/(1 + (p1_plus_right[ti]/p_por[ti]))
+        Ga[ti] = brk  /(1 + (p1_plus_right[ti]/p_por[ti]))
+        G[ti] = Ge[ti]-Ga[ti]
+        K[ti] = np.exp(G[ti] * L)
+
+    return dNdt
+
+def N_RK(y, ti, h):
+    t = t_mass[ti]
+    # k1 = Eq12(t, y, r_mass[ti], ti)
+    # k2 = Eq12(t + h / 2, y + k1 * h / 2, r_mass[ti])
+    # k3 = Eq12(t + h / 2, y + k2 * h / 2, r_mass[ti])
+    # k4 = Eq12(t + h, y + k3 * h, r_mass[ti])
+    # y_next = y + h / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+    k1 = Eq12(t, y, r_mass[ti], ti)
+    k2 = Eq12(t + h, y + k1 * h, r_mass[ti], ti+1)
+    y_next = y + h / 2 * (k1 + k2)
+
+    return y_next
+
+
+
+n = np.zeros((2, N0.size))
+n[0, :] = N0
+u = 0
+ut = 0
+r_mass[0] = Eq8(u)
+
+for j in range(nt):
+    n = N_RK(n, j, dt)
+    u, ut = Eq7_RK(u, ut, j)
+    r_mass[j+1] = Eq8(u)
+
+ro = P_nul1/Pfiks
+print(ro)
+Pfpmax = np.max(p2_minus_left[20000:-1])
+Pfpmin = np.min(p2_minus_left[20000:-1])
+Depth = (Pfpmax - Pfpmin)/(Pfpmax + Pfpmin)
+print(Depth)
+
+def plotter(z, A, tit):
+    fig = plt.figure(facecolor='w')
+    # ax = fig.add_subplot(111)
+    plt.xlabel('Время (сек)')
+    plt.ylabel('Мощность накачки после прохода через волокно')
+    plt.title(tit)
+    plt.grid(True)
+    # pcm = ax.plot(z,A)
+    plt.plot(z, A)
+    plt.show()
+
+    return fig
+
+plotter(t_mass, K[:-1], r'$K$')
+plotter(t_mass, p2_minus_left[:-1], r'$P_{2-}$')
+plotter(t_mass, r_mass[:-1], 'R')
+plotter(t_mass, p2_plus_right[:-1], r'$P_{2+}$')
+plotter(t_mass, p2_plus_right[:-1] * r_mass[:-1], r'$P_{2+}*R$')
+plotter(t_mass, p2_plus_right[:-1] * r_mass[:-1] * K[:-1], r'$P_{2+}*R*K$')
+plotter(t_mass, p1_plus_right[:-1], r'$P_{1+}$')
